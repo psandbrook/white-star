@@ -2,6 +2,7 @@
 *.o
 
 /.libs/
+/apps/.libs/
 /GDALmake.opt
 /apps/gdal-config
 /apps/gdal-config-inst
