@@ -277,6 +277,15 @@ Renderer::Renderer(AppState* const app_state) : app_state(app_state) {
 
     vbos_ptr = &vbos;
 
+    const char* const allowed_drivers_gpkg[] = {"GPKG", nullptr};
+    admin_1_fixed_ds = static_cast<GDALDataset*>(GDALOpenEx(get_resource_path("gis/vector/admin_1_fixed.gpkg").c_str(),
+                                                            GDAL_OF_VECTOR | GDAL_OF_READONLY, allowed_drivers_gpkg,
+                                                            nullptr, nullptr));
+    CHECK_NOTNULL_F(admin_1_fixed_ds);
+
+    admin_1_fixed_l = admin_1_fixed_ds->GetLayerByName("admin_1_fixed");
+    DEXPR(admin_1_fixed_l->GetFeatureCount());
+
     glfwSwapInterval(1);
 
     constexpr f32 bg_shade = 0.0f;

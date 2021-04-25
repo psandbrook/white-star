@@ -377,6 +377,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND DEBUG_ENABLE_PCH)
     <GLFW/glfw3.h>
     <glad/glad.h>
     <loguru.hpp>
+    <ogrsf_frmts.h>
 
     <algorithm>
     <array>

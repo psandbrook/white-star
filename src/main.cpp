@@ -5,6 +5,7 @@
 
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
+#include <ogrsf_frmts.h>
 
 namespace {
 
@@ -19,6 +20,7 @@ int main(int argc, char** argv) {
 
     loguru::init(argc, argv);
     init_resource_path();
+    GDALAllRegister();
 
     glfwSetErrorCallback(glfw_error_callback);
     CHECK_F(glfwInit());
