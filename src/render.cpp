@@ -6,6 +6,8 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/mat4x4.hpp>
+#include <mapbox/earcut.hpp>
+#include <ogrsf_frmts.h>
 
 #include <fstream>
 #include <sstream>
@@ -277,15 +279,6 @@ Renderer::Renderer(AppState* const app_state) : app_state(app_state) {
 
     vbos_ptr = &vbos;
 
-    const char* const allowed_drivers_gpkg[] = {"GPKG", nullptr};
-    admin_1_fixed_ds = static_cast<GDALDataset*>(GDALOpenEx(get_resource_path("gis/vector/admin_1_fixed.gpkg").c_str(),
-                                                            GDAL_OF_VECTOR | GDAL_OF_READONLY, allowed_drivers_gpkg,
-                                                            nullptr, nullptr));
-    CHECK_NOTNULL_F(admin_1_fixed_ds);
-
-    admin_1_fixed_l = admin_1_fixed_ds->GetLayerByName("admin_1_fixed");
-    DEXPR(admin_1_fixed_l->GetFeatureCount());
-
     glfwSwapInterval(1);
 
     constexpr f32 bg_shade = 0.0f;
@@ -297,14 +290,80 @@ Renderer::Renderer(AppState* const app_state) : app_state(app_state) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_FRAMEBUFFER_SRGB);
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
+    // glEnable(GL_CULL_FACE);
 
-    view_projection_ubo = UniformBufferObject("ViewProjection", 0, GL_DYNAMIC_DRAW);
+    view_projection_ubo = UniformBufferObject("ViewProjection", 0, GL_STREAM_DRAW);
 
     {
-        const u32 vert_shader = compile_shader("cube.vert", GL_VERTEX_SHADER);
-        const u32 frag_shader = compile_shader("cube.frag", GL_FRAGMENT_SHADER);
-        cube_prog = ShaderProgram(vert_shader, frag_shader);
+        const char* const allowed_drivers_gpkg[] = {"GPKG", nullptr};
+        GDALDataset* admin_1_fixed_ds = static_cast<GDALDataset*>(
+                GDALOpenEx(get_resource_path("gis/vector/admin_1_fixed.gpkg").c_str(),
+                           GDAL_OF_VECTOR | GDAL_OF_READONLY, allowed_drivers_gpkg, nullptr, nullptr));
+        CHECK_NOTNULL_F(admin_1_fixed_ds);
+        DEFER([&] { GDALClose(admin_1_fixed_ds); });
+
+        OGRLayer* admin_1_fixed_l = admin_1_fixed_ds->GetLayerByName("admin_1_fixed");
+        // OGRSpatialReference* spatial_ref = admin_1_fixed_l->GetSpatialRef();
+
+        using Point = std::array<f64, 2>;
+        using Polygon = std::vector<std::vector<Point>>;
+        std::vector<Point> vertices_2d;
+        std::vector<u32> tri_indices;
+
+        for (auto& feature : admin_1_fixed_l) {
+            CHECK_F(feature->GetGeomFieldCount() == 1);
+            OGRGeometry* geom = feature->GetGeometryRef();
+            CHECK_F(geom->getGeometryType() == wkbMultiPolygon);
+            OGRMultiPolygon* multi_poly = geom->toMultiPolygon();
+            CHECK_F(multi_poly->getNumGeometries() > 0);
+
+            for (auto& poly : multi_poly) {
+                CHECK_NOTNULL_F(poly->getExteriorRing());
+
+                Polygon polygon_vec;
+                for (auto& ring : poly) {
+                    CHECK_F(ring->getNumPoints() > 0);
+
+                    std::vector<Point> ring_vec;
+                    for (auto& point : ring) {
+                        CHECK_F(!point.Is3D());
+                        const f64 longitude = point.getX();
+                        const f64 latitude = point.getY();
+                        CHECK_F(latitude >= -90 && latitude <= 90);
+                        CHECK_F(longitude >= -180 && longitude <= 180);
+                        ring_vec.push_back({longitude, latitude});
+                    }
+                    polygon_vec.push_back(std::move(ring_vec));
+                }
+
+                std::vector<u32> poly_tri_indices = mapbox::earcut(polygon_vec);
+                u32 vertices_2d_offset = static_cast<u32>(vertices_2d.size());
+                for (const auto& ring : polygon_vec) {
+                    for (const auto& point : ring) {
+                        vertices_2d.push_back(point);
+                    }
+                }
+
+                for (u32 index : poly_tri_indices) {
+                    tri_indices.push_back(index + vertices_2d_offset);
+                }
+            }
+        }
+
+        std::vector<glm::vec3> vertices;
+        for (const auto& point : vertices_2d) {
+            const f64 longitude = point[0];
+            const f64 latitude = point[1];
+            const f64 azimuth = glm::radians(-longitude + 180);
+            const f64 inclination = glm::radians(-latitude + 90);
+            const glm::dvec3 v = {std::sin(inclination) * std::cos(azimuth), std::cos(inclination),
+                                  std::sin(inclination) * std::sin(azimuth)};
+            vertices.push_back(glm::vec3(v));
+        }
+
+        const u32 vert_shader = compile_shader("planet.vert", GL_VERTEX_SHADER);
+        const u32 frag_shader = compile_shader("planet.frag", GL_FRAGMENT_SHADER);
+        planet_prog = ShaderProgram(vert_shader, frag_shader);
 
         const u32 vbo = add_vbo(GL_STATIC_DRAW);
         const VertexSpec spec = {
@@ -315,43 +374,15 @@ Renderer::Renderer(AppState* const app_state) : app_state(app_state) {
                 .offset = 0,
         };
 
-        // clang-format off
-        const f32 cube_vertices[] = {
-            -1.0f, 1.0f, -1.0f,
-            -1.0f, 1.0f, 1.0f,
-            1.0f, 1.0f, -1.0f,
-            1.0f, 1.0f, 1.0f,
-            -1.0f, -1.0f, -1.0f,
-            -1.0f, -1.0f, 1.0f,
-            1.0f, -1.0f, -1.0f,
-            1.0f, -1.0f, 1.0f,
-        };
-
-        const u32 cube_indices[] = {
-            0, 1, 2,
-            1, 3, 2,
-            4, 6, 5,
-            5, 6, 7,
-            1, 5, 3,
-            3, 5, 7,
-            3, 7, 6,
-            3, 6, 2,
-            6, 4, 2,
-            0, 2, 4,
-            0, 5, 1,
-            0, 4, 5,
-        };
-        // clang-format on
-
-        vbos.at(vbo).buffer_data_realloc(cube_vertices, sizeof(cube_vertices));
+        vbos.at(vbo).buffer_data_realloc(vertices.data(), vertices.size() * sizeof(glm::vec3));
 
         auto ebo = ElementBufferObject(GL_STATIC_DRAW, GL_TRIANGLES);
-        ebo.buffer_elements_realloc(cube_indices, std::size(cube_indices));
+        ebo.buffer_elements_realloc(tri_indices.data(), static_cast<i32>(tri_indices.size()));
 
-        cube_vao = VertexArrayObject(&cube_prog, {vbo}, {spec}, ebo);
+        planet_vao = VertexArrayObject(&planet_prog, {vbo}, {spec}, ebo);
     }
 
-    for (ShaderProgram* program : {&cube_prog}) {
+    for (ShaderProgram* program : {&planet_prog}) {
         program->bind_uniform_block(view_projection_ubo);
     }
 }
@@ -392,7 +423,7 @@ void Renderer::render() {
     const glm::mat4 vp = projection * view;
     view_projection_ubo.buffer_data(glm::value_ptr(vp), sizeof(vp));
 
-    cube_vao.draw();
+    planet_vao.draw();
 
     glfwSwapBuffers(app_state->window);
 

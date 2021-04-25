@@ -4,7 +4,6 @@
 #include <utility.hpp>
 
 #include <glad/glad.h>
-#include <ogrsf_frmts.h>
 
 #include <initializer_list>
 
@@ -117,16 +116,13 @@ struct VertexArrayObject {
 struct Renderer {
     AppState* app_state;
 
-    GDALDataset* admin_1_fixed_ds;
-    OGRLayer* admin_1_fixed_l;
-
     u32 next_vbo_id = 0;
     std::unordered_map<u32, VertexBufferObject> vbos;
 
     UniformBufferObject view_projection_ubo;
 
-    ShaderProgram cube_prog;
-    VertexArrayObject cube_vao;
+    ShaderProgram planet_prog;
+    VertexArrayObject planet_vao;
 
     Renderer() = default;
     explicit Renderer(AppState* app_state);

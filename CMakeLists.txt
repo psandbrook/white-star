@@ -80,13 +80,13 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  list(APPEND COMPILE_FLAGS -DDEBUG)
+  list(APPEND COMPILE_FLAGS -DDEBUG -O0)
 
   if(DEBUG_ENABLE_DEBUG_INFO)
-    list(APPEND COMPILE_FLAGS -Og -g)
+    list(APPEND COMPILE_FLAGS -g)
     list(APPEND LINK_FLAGS -rdynamic)
   else()
-    list(APPEND COMPILE_FLAGS -O0 -g0)
+    list(APPEND COMPILE_FLAGS -g0)
   endif()
 
   if(DEBUG_ENABLE_UBSAN)
@@ -160,6 +160,9 @@ target_include_directories(glad PUBLIC deps/glad/include)
 add_library(glm INTERFACE)
 target_include_directories(glm INTERFACE deps/glm)
 
+add_library(earcut INTERFACE)
+target_include_directories(earcut SYSTEM INTERFACE deps/earcut/include)
+
 add_library(loguru deps/loguru/loguru.cpp)
 target_include_directories(loguru PUBLIC deps/loguru)
 target_compile_definitions(loguru PUBLIC LOGURU_USE_FMTLIB)
@@ -195,7 +198,10 @@ set_cache_internal(SQLITE3_INCLUDE_DIR ${SQLITE_INCLUDE_DIR})
 set_cache_internal(SQLITE3_LIBRARY $<TARGET_FILE:sqlite>)
 set_cache_internal(BUILD_TESTING OFF)
 set_cache_internal(ENABLE_CURL OFF)
+
+# TODO: Build with libtiff
 set_cache_internal(ENABLE_TIFF OFF)
+
 add_subdirectory(deps/proj)
 
 set(PROJ_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/deps/proj/src ${CMAKE_SOURCE_DIR}/deps/proj/include)
@@ -370,7 +376,7 @@ target_include_directories(white-star PRIVATE src)
 target_compile_options(white-star PRIVATE ${LOCAL_COMPILE_FLAGS} ${CXX_WARNING_FLAGS})
 target_link_options(white-star PRIVATE ${LOCAL_COMPILE_FLAGS} ${CXX_WARNING_FLAGS})
 target_compile_definitions(white-star PRIVATE GLFW_INCLUDE_NONE)
-target_link_libraries(white-star glfw glad glm loguru fmt whereami gdal)
+target_link_libraries(white-star glfw glad glm loguru fmt whereami gdal earcut)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND DEBUG_ENABLE_PCH)
   target_precompile_headers(white-star PUBLIC
