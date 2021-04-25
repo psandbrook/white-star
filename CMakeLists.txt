@@ -66,7 +66,8 @@ set(COMPILE_FLAGS
   -pipe -fvisibility=hidden -fstack-protector-strong -fno-plt -m64 -march=native -fPIE -pthread
 )
 
-set(LOCAL_COMPILE_FLAGS)
+set(PROJECT_COMPILE_FLAGS)
+set(PROJECT_LINK_FLAGS)
 set(LINK_FLAGS -pie -Wl,-z,relro,-z,now,-z,defs,--sort-common,--as-needed)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -79,41 +80,41 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   list(APPEND LINK_FLAGS -fuse-ld=lld)
 endif()
 
+set(COMPILE_FLAGS_RELEASE
+  -O3 -g0 -DNDEBUG -D_FORTIFY_SOURCE=2 -fno-semantic-interposition -ffunction-sections -fdata-sections
+  "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+)
+
+set(LINK_FLAGS_RELEASE -Wl,--gc-sections,-O1)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  list(APPEND COMPILE_FLAGS_RELEASE -flto=${NPROC} -ffat-lto-objects)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  list(APPEND COMPILE_FLAGS_RELEASE -flto=thin)
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  list(APPEND COMPILE_FLAGS -DDEBUG -O0)
+  list(APPEND PROJECT_COMPILE_FLAGS -DDEBUG -D_GLIBCXX_DEBUG -O0 -fno-lto)
 
   if(DEBUG_ENABLE_DEBUG_INFO)
-    list(APPEND COMPILE_FLAGS -g)
-    list(APPEND LINK_FLAGS -rdynamic)
+    list(APPEND PROJECT_COMPILE_FLAGS -g)
+    list(APPEND PROJECT_LINK_FLAGS -rdynamic)
   else()
-    list(APPEND COMPILE_FLAGS -g0)
+    list(APPEND PROJECT_COMPILE_FLAGS -g0)
   endif()
 
   if(DEBUG_ENABLE_UBSAN)
-    list(APPEND LOCAL_COMPILE_FLAGS -fsanitize=undefined)
+    list(APPEND PROJECT_COMPILE_FLAGS -fsanitize=undefined)
   endif()
 
   if(DEBUG_ENABLE_ASAN)
-    list(APPEND LOCAL_COMPILE_FLAGS -fsanitize=address)
+    list(APPEND PROJECT_COMPILE_FLAGS -fsanitize=address)
   endif()
-
-  add_compile_definitions(_GLIBCXX_DEBUG)
 
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   list(APPEND CXX_WARNING_FLAGS -Wno-unused -Wno-unused-parameter)
-
-  list(APPEND COMPILE_FLAGS
-    -O3 -g0 -DNDEBUG -D_FORTIFY_SOURCE=2 -fno-semantic-interposition -ffunction-sections -fdata-sections
-    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
-  )
-
-  list(APPEND LINK_FLAGS -Wl,--gc-sections,-O1)
-
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    list(APPEND COMPILE_FLAGS -flto=${NPROC})
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    list(APPEND COMPILE_FLAGS -flto=thin)
-  endif()
+  list(APPEND PROJECT_COMPILE_FLAGS ${COMPILE_FLAGS_RELEASE})
+  list(APPEND PROJECT_LINK_FLAGS ${LINK_FLAGS_RELEASE})
 endif()
 
 list(APPEND COMPILE_FLAGS -fno-strict-aliasing)
@@ -136,16 +137,6 @@ add_link_options(
   ${LINK_FLAGS}
 )
 
-get_directory_property(FULL_COMPILE_DEFINITIONS COMPILE_DEFINITIONS)
-list(TRANSFORM FULL_COMPILE_DEFINITIONS PREPEND -D)
-
-set(FULL_C_FLAGS ${FULL_COMPILE_DEFINITIONS} ${COMPILE_FLAGS})
-set(FULL_CXX_FLAGS ${FULL_COMPILE_DEFINITIONS} ${CXX_COMPILE_FLAGS} ${COMPILE_FLAGS})
-set(FULL_LINK_FLAGS ${CXX_COMPILE_FLAGS} ${COMPILE_FLAGS} ${LINK_FLAGS})
-list(JOIN FULL_C_FLAGS " " FULL_C_FLAGS_STRING)
-list(JOIN FULL_CXX_FLAGS " " FULL_CXX_FLAGS_STRING)
-list(JOIN FULL_LINK_FLAGS " " FULL_LINK_FLAGS_STRING)
-
 set(EXTERNALPROJECT_LOG_ARGS
   LOG_CONFIGURE ON
   LOG_BUILD ON
@@ -155,6 +146,7 @@ set(EXTERNALPROJECT_LOG_ARGS
 )
 
 add_library(glad deps/glad/src/glad.c)
+target_compile_options(glad PRIVATE ${COMPILE_FLAGS_RELEASE})
 target_include_directories(glad PUBLIC deps/glad/include)
 
 add_library(glm INTERFACE)
@@ -164,22 +156,27 @@ add_library(earcut INTERFACE)
 target_include_directories(earcut SYSTEM INTERFACE deps/earcut/include)
 
 add_library(loguru deps/loguru/loguru.cpp)
+target_compile_options(loguru PRIVATE ${COMPILE_FLAGS_RELEASE})
 target_include_directories(loguru PUBLIC deps/loguru)
 target_compile_definitions(loguru PUBLIC LOGURU_USE_FMTLIB)
 target_link_libraries(loguru fmt)
 
 add_library(whereami deps/whereami/src/whereami.c)
+target_compile_options(whereami PRIVATE ${COMPILE_FLAGS_RELEASE})
 target_include_directories(whereami PUBLIC deps/whereami/src)
 
 set(SQLITE_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/deps/sqlite-amalgamation)
 
 add_library(sqlite deps/sqlite-amalgamation/sqlite3.c)
+target_compile_options(sqlite PRIVATE ${COMPILE_FLAGS_RELEASE})
 target_include_directories(sqlite PUBLIC ${SQLITE_INCLUDE_DIR})
 target_compile_definitions(sqlite PUBLIC HAVE_USLEEP SQLITE_ENABLE_COLUMN_METADATA)
 target_link_libraries(sqlite m dl)
 set(SQLITE_LIBRARY_DIR ${CMAKE_BINARY_DIR})
 
 add_executable(sqlite_cli deps/sqlite-amalgamation/shell.c)
+target_compile_options(sqlite_cli PRIVATE ${COMPILE_FLAGS_RELEASE})
+target_link_options(sqlite_cli PRIVATE ${COMPILE_FLAGS_RELEASE} ${LINK_FLAGS_RELEASE})
 target_link_libraries(sqlite_cli sqlite)
 
 set_target_properties(sqlite sqlite_cli PROPERTIES OUTPUT_NAME sqlite3)
@@ -189,8 +186,10 @@ set_cache_internal(GLFW_BUILD_TESTS OFF)
 set_cache_internal(GLFW_BUILD_EXAMPLES OFF)
 set_cache_internal(GLFW_INSTALL OFF)
 add_subdirectory(deps/glfw)
+target_compile_options(glfw PRIVATE ${COMPILE_FLAGS_RELEASE})
 
 add_subdirectory(deps/fmt)
+target_compile_options(fmt PRIVATE ${COMPILE_FLAGS_RELEASE})
 
 set_cache_internal(BUILD_PROJSYNC OFF)
 set_cache_internal(EXE_SQLITE3 $<TARGET_FILE:sqlite_cli>)
@@ -203,6 +202,8 @@ set_cache_internal(ENABLE_CURL OFF)
 set_cache_internal(ENABLE_TIFF OFF)
 
 add_subdirectory(deps/proj)
+target_compile_options(proj PRIVATE ${COMPILE_FLAGS_RELEASE})
+target_link_options(proj PRIVATE ${COMPILE_FLAGS_RELEASE} ${LINK_FLAGS_RELEASE})
 
 set(PROJ_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/deps/proj/src ${CMAKE_SOURCE_DIR}/deps/proj/include)
 target_include_directories(proj INTERFACE "$<BUILD_INTERFACE:${PROJ_INCLUDE_DIRS}>")
@@ -213,12 +214,23 @@ set(PROJ_INCLUDE_DIRS_OPTIONS ${PROJ_INCLUDE_DIRS})
 list(TRANSFORM PROJ_INCLUDE_DIRS_OPTIONS PREPEND -I)
 list(JOIN PROJ_INCLUDE_DIRS_OPTIONS " " PROJ_INCLUDE_DIRS_OPTIONS_STRING)
 
+get_directory_property(FULL_COMPILE_DEFINITIONS COMPILE_DEFINITIONS)
+list(TRANSFORM FULL_COMPILE_DEFINITIONS PREPEND -D)
+
+set(GDAL_C_FLAGS ${FULL_COMPILE_DEFINITIONS} ${COMPILE_FLAGS} ${COMPILE_FLAGS_RELEASE})
+list(FILTER GDAL_C_FLAGS EXCLUDE REGEX "^-flto")
+set(GDAL_CXX_FLAGS ${CXX_COMPILE_FLAGS} ${GDAL_C_FLAGS})
+set(GDAL_LINK_FLAGS ${GDAL_CXX_FLAGS} ${LINK_FLAGS} ${LINK_FLAGS_RELEASE} -fno-lto)
+list(JOIN GDAL_C_FLAGS " " GDAL_C_FLAGS_STRING)
+list(JOIN GDAL_CXX_FLAGS " " GDAL_CXX_FLAGS_STRING)
+list(JOIN GDAL_LINK_FLAGS " " GDAL_LINK_FLAGS_STRING)
+
 set(GDAL_ENV_VARS
   "CC=${CMAKE_C_COMPILER_LAUNCHER} ${CMAKE_C_COMPILER}"
   "CXX=${CMAKE_CXX_COMPILER_LAUNCHER} ${CMAKE_CXX_COMPILER}"
-  "CFLAGS=${FULL_C_FLAGS_STRING} ${PROJ_INCLUDE_DIRS_OPTIONS_STRING}"
-  "CXXFLAGS=${FULL_CXX_FLAGS_STRING} ${PROJ_INCLUDE_DIRS_OPTIONS_STRING}"
-  "LDFLAGS=${FULL_LINK_FLAGS_STRING} -L${SQLITE_LIBRARY_DIR} -L${PROJ_LIBRARY_DIR} -lm -ldl -lsqlite3"
+  "CFLAGS=${GDAL_C_FLAGS_STRING} ${PROJ_INCLUDE_DIRS_OPTIONS_STRING}"
+  "CXXFLAGS=${GDAL_CXX_FLAGS_STRING} ${PROJ_INCLUDE_DIRS_OPTIONS_STRING}"
+  "LDFLAGS=${GDAL_LINK_FLAGS_STRING} -L${SQLITE_LIBRARY_DIR} -L${PROJ_LIBRARY_DIR} -lm -ldl -lsqlite3"
 )
 
 set(GDAL_CONFIGURE_ARGS
@@ -373,8 +385,8 @@ add_custom_target(clean-install
 
 add_executable(white-star ${SOURCES})
 target_include_directories(white-star PRIVATE src)
-target_compile_options(white-star PRIVATE ${LOCAL_COMPILE_FLAGS} ${CXX_WARNING_FLAGS})
-target_link_options(white-star PRIVATE ${LOCAL_COMPILE_FLAGS} ${CXX_WARNING_FLAGS})
+target_compile_options(white-star PRIVATE ${PROJECT_COMPILE_FLAGS} ${CXX_WARNING_FLAGS})
+target_link_options(white-star PRIVATE ${PROJECT_COMPILE_FLAGS} ${PROJECT_LINK_FLAGS} ${CXX_WARNING_FLAGS})
 target_compile_definitions(white-star PRIVATE GLFW_INCLUDE_NONE)
 target_link_libraries(white-star glfw glad glm loguru fmt whereami gdal earcut)
 
