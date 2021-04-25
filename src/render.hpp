@@ -3,6 +3,7 @@
 #include <utility.hpp>
 
 #include <glad/glad.h>
+#include <glm/vec3.hpp>
 
 #include <initializer_list>
 
@@ -11,11 +12,11 @@ public:
     u32 id = 0;
     GLenum type;
     GLenum usage;
-    size_t size = 0;
+    GLsizeiptr size = 0;
 
     void bind();
-    void buffer_data(const void* data, size_t size);
-    void buffer_data_realloc(const void* data, size_t size);
+    void buffer_data(const void* data, GLsizeiptr size);
+    void buffer_data_realloc(const void* data, GLsizeiptr size);
     void destroy();
 
 protected:

@@ -1,6 +1,8 @@
 #include <app.hpp>
 
 #include <glm/ext/matrix_transform.hpp>
+#include <ogrsf_frmts.h>
+#include <whereami.h>
 
 namespace {
 

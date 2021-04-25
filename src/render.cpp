@@ -21,21 +21,21 @@ void GLBuffer::bind() {
     glBindBuffer(type, id);
 }
 
-void GLBuffer::buffer_data(const void* const data, const size_t data_size) {
+void GLBuffer::buffer_data(const void* const data, const GLsizeiptr size) {
     CHECK_F(usage != GL_STATIC_DRAW);
     bind();
-    if (this->size < data_size) {
-        glBufferData(type, data_size, data, usage);
-        this->size = data_size;
+    if (this->size < size) {
+        glBufferData(type, size, data, usage);
+        this->size = size;
     } else {
-        glBufferSubData(type, 0, data_size, data);
+        glBufferSubData(type, 0, size, data);
     }
 }
 
-void GLBuffer::buffer_data_realloc(const void* const data, const size_t data_size) {
+void GLBuffer::buffer_data_realloc(const void* const data, const GLsizeiptr size) {
     bind();
-    glBufferData(type, data_size, data, usage);
-    this->size = data_size;
+    glBufferData(type, size, data, usage);
+    this->size = size;
 }
 
 void GLBuffer::destroy() {
@@ -49,12 +49,12 @@ ElementBufferObject::ElementBufferObject(const GLenum usage, const GLenum primit
         : GLBuffer(GL_ELEMENT_ARRAY_BUFFER, usage), primitive(primitive) {}
 
 void ElementBufferObject::buffer_elements(const void* const data, const i32 count) {
-    buffer_data(data, static_cast<size_t>(count) * sizeof(u32));
+    buffer_data(data, static_cast<GLsizeiptr>(static_cast<size_t>(count) * sizeof(u32)));
     this->count = count;
 }
 
 void ElementBufferObject::buffer_elements_realloc(const void* const data, const i32 count) {
-    buffer_data_realloc(data, static_cast<size_t>(count) * sizeof(u32));
+    buffer_data_realloc(data, static_cast<GLsizeiptr>(static_cast<size_t>(count) * sizeof(u32)));
     this->count = count;
 }
 
@@ -142,11 +142,13 @@ Framebuffer::Framebuffer(const u32 width, const u32 height) : width(width), heig
 
     glGenRenderbuffers(2, rbos);
     glBindRenderbuffer(GL_RENDERBUFFER, color_rbo);
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, render_samples, GL_SRGB8, width, height);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, render_samples, GL_SRGB8, static_cast<GLsizei>(width),
+                                     static_cast<GLsizei>(height));
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, color_rbo);
 
     glBindRenderbuffer(GL_RENDERBUFFER, depth_rbo);
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, render_samples, GL_DEPTH_COMPONENT24, width, height);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, render_samples, GL_DEPTH_COMPONENT24, static_cast<GLsizei>(width),
+                                     static_cast<GLsizei>(height));
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth_rbo);
 
 #ifdef DEBUG
@@ -341,7 +343,7 @@ void Renderer::init(App* app) {
                 .offset = 0,
         };
 
-        vbos.at(vbo).buffer_data_realloc(vertices.data(), vertices.size() * sizeof(glm::vec3));
+        vbos.at(vbo).buffer_data_realloc(vertices.data(), static_cast<GLsizeiptr>(vertices.size() * sizeof(glm::vec3)));
 
         auto ebo = ElementBufferObject(GL_STATIC_DRAW, GL_TRIANGLES);
         ebo.buffer_elements_realloc(tri_indices.data(), static_cast<i32>(tri_indices.size()));

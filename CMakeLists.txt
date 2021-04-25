@@ -217,8 +217,10 @@ set_target_property(${FMT_TARGETS} PROPERTY LINK_OPTIONS
   "${COMPLETE_COMPILE_FLAGS}" ${COMPLETE_LINK_FLAGS} ${COMPILE_FLAGS_DEFAULT_OPT})
 
 get_target_property(FMT_INTERFACE_LINK_LIBRARIES fmt INTERFACE_LINK_LIBRARIES)
-list(REMOVE_ITEM FMT_INTERFACE_LINK_LIBRARIES "-Wl,--as-needed")
-set_target_property(fmt PROPERTY INTERFACE_LINK_LIBRARIES ${FMT_INTERFACE_LINK_LIBRARIES})
+if(FMT_INTERFACE_LINK_LIBRARIES)
+  list(REMOVE_ITEM FMT_INTERFACE_LINK_LIBRARIES "-Wl,--as-needed")
+  set_target_property(fmt PROPERTY INTERFACE_LINK_LIBRARIES ${FMT_INTERFACE_LINK_LIBRARIES})
+endif()
 
 # --- SQLite ---
 
@@ -454,7 +456,7 @@ ExternalProject_Add_Step(gdal_ep post_build
 
 add_library(gdal INTERFACE)
 target_include_directories(gdal SYSTEM INTERFACE ${GDAL_INCLUDE_DIRS})
-target_link_libraries(gdal INTERFACE sqlite proj ${GDAL_LIBRARY_PATH})
+target_link_libraries(gdal INTERFACE ${GDAL_LIBRARY_PATH} sqlite proj)
 
 add_custom_target(clean_gdal_ep
   COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/gdal_ep-prefix
