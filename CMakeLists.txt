@@ -104,7 +104,7 @@ endif()
 
 set(CXX_COMPILE_FLAGS)
 
-set(LINK_FLAGS -Wl,-z,relro,-z,now,-z,defs,--sort-common,--as-needed)
+set(LINK_FLAGS -Wl,-z,relro,-z,now,-z,defs,--sort-common)
 
 set(PROJECT_COMPILE_FLAGS)
 set(PROJECT_LINK_FLAGS)
@@ -133,9 +133,9 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  list(APPEND LINK_FLAGS -Wl,--disable-new-dtags)
+  list(APPEND LINK_FLAGS -Wl,--disable-new-dtags,--no-as-needed)
 
-  list(APPEND PROJECT_COMPILE_FLAGS -DDEBUG -D_GLIBCXX_DEBUG -ggdb -fno-lto)
+  list(APPEND PROJECT_COMPILE_FLAGS -DDEBUG -DHOT_RELOAD -D_GLIBCXX_DEBUG -ggdb -fno-lto)
   list(APPEND PROJECT_LINK_FLAGS -rdynamic)
 
   if(DEBUG_OPTIMIZATION)
@@ -157,6 +157,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   list(APPEND COMPILE_FLAGS -fvisibility=hidden)
+  list(APPEND LINK_FLAGS -Wl,--as-needed)
   list(APPEND CXX_COMPILE_FLAGS -fvisibility-inlines-hidden)
 
   list(APPEND CXX_WARNING_FLAGS -Wno-unused -Wno-unused-parameter)
@@ -448,47 +449,62 @@ add_custom_target(clean_install
 
 # === This project ===
 
-add_executable(white_star
-  src/main.cpp
-  src/app_state.cpp
-  src/render.cpp
-  src/filesystem.cpp
-)
-
-target_include_directories(white_star PRIVATE src)
-target_compile_options(white_star PRIVATE ${PROJECT_COMPILE_FLAGS} ${CXX_WARNING_FLAGS})
-target_link_options(white_star PRIVATE ${PROJECT_COMPILE_FLAGS} ${PROJECT_LINK_FLAGS} ${CXX_WARNING_FLAGS})
-target_compile_definitions(white_star PRIVATE GLFW_INCLUDE_NONE)
-target_link_libraries(white_star glfw glad glm loguru fmt whereami gdal earcut)
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND DEBUG_ENABLE_PCH)
-  target_precompile_headers(white_star PRIVATE
-    <glad/glad.h>
-    <GLFW/glfw3.h>
-    <glm/ext/matrix_clip_space.hpp>
-    <glm/ext/matrix_transform.hpp>
-    <glm/gtc/type_ptr.hpp>
-    <glm/mat4x4.hpp>
-    <glm/trigonometric.hpp>
-    <glm/vec3.hpp>
-    <loguru.hpp>
-    <mapbox/earcut.hpp>
-    <ogrsf_frmts.h>
-    <whereami.h>
-
-    <algorithm>
-    <array>
-    <cmath>
-    <cstdint>
-    <filesystem>
-    <fstream>
-    <functional>
-    <initializer_list>
-    <sstream>
-    <string>
-    <string.h>
-    <utility>
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_library(white_star_lib
+    src/app.cpp
+    src/render.cpp
   )
+
+  add_executable(white_star src/main.cpp)
+
+  if(DEBUG_ENABLE_PCH)
+    target_precompile_headers(white_star_lib PRIVATE
+      <glad/glad.h>
+      <GLFW/glfw3.h>
+      <glm/ext/matrix_clip_space.hpp>
+      <glm/ext/matrix_transform.hpp>
+      <glm/gtc/type_ptr.hpp>
+      <glm/mat4x4.hpp>
+      <glm/trigonometric.hpp>
+      <glm/vec3.hpp>
+      <loguru.hpp>
+      <mapbox/earcut.hpp>
+      <ogrsf_frmts.h>
+      <whereami.h>
+
+      <algorithm>
+      <array>
+      <cmath>
+      <cstdint>
+      <filesystem>
+      <fstream>
+      <functional>
+      <initializer_list>
+      <sstream>
+      <string>
+      <string.h>
+      <utility>
+    )
+  endif()
+
+  set(PROJECT_TARGETS white_star_lib white_star)
+
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+  add_executable(white_star
+    src/main.cpp
+    src/app.cpp
+    src/render.cpp
+  )
+  set(PROJECT_TARGETS white_star)
 endif()
 
+foreach(TARGET ${PROJECT_TARGETS})
+  target_include_directories(${TARGET} PRIVATE src)
+  target_compile_options(${TARGET} PRIVATE ${PROJECT_COMPILE_FLAGS} ${CXX_WARNING_FLAGS})
+  target_link_options(${TARGET} PRIVATE ${PROJECT_COMPILE_FLAGS} ${PROJECT_LINK_FLAGS} ${CXX_WARNING_FLAGS})
+  target_compile_definitions(${TARGET} PRIVATE GLFW_INCLUDE_NONE)
+  target_link_libraries(${TARGET} glfw glad glm loguru fmt whereami gdal earcut)
+endforeach()
+
 file(CREATE_LINK ${CMAKE_SOURCE_DIR}/data ${CMAKE_BINARY_DIR}/data SYMBOLIC)
+file(CREATE_LINK ${CMAKE_SOURCE_DIR}/rebuild.sh ${CMAKE_BINARY_DIR}/rebuild.sh SYMBOLIC)

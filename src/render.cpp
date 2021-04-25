@@ -1,6 +1,6 @@
 #include <render.hpp>
 
-#include <filesystem.hpp>
+#include <app.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -11,41 +11,6 @@
 
 #include <fstream>
 #include <sstream>
-
-namespace {
-
-std::unordered_map<u32, VertexBufferObject>* vbos_ptr = nullptr;
-
-u32 compile_shader(const Path& relative_shader_path, const GLenum type) {
-    auto relative_path = Path("shaders/");
-    relative_path /= relative_shader_path;
-    const Path path = get_resource_path(relative_path);
-
-    std::ifstream stream(path);
-    CHECK_F(bool(stream));
-
-    std::stringstream source_buffer;
-    source_buffer << stream.rdbuf();
-    const std::string source = source_buffer.str();
-    const char* const source_c = source.c_str();
-
-    const u32 shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source_c, nullptr);
-    glCompileShader(shader);
-
-    i32 success;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        i32 len;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
-        std::vector<char> log(static_cast<size_t>(len));
-        glGetShaderInfoLog(shader, len, NULL, log.data());
-        ABORT_F("Shader compilation failed: {}", log.data());
-    }
-
-    return shader;
-}
-} // namespace
 
 GLBuffer::GLBuffer(const GLenum type, const GLenum usage) : type(type), usage(usage) {
     glGenBuffers(1, &id);
@@ -232,9 +197,10 @@ void Framebuffer::destroy() {
     *this = Framebuffer();
 }
 
-VertexArrayObject::VertexArrayObject(ShaderProgram* const shader_program, std::initializer_list<u32> vbos_,
-                                     std::initializer_list<VertexSpec> specs, const ElementBufferObject ebo_)
-        : shader_program(shader_program), vbo_ids(vbos_.begin(), vbos_.end()), ebo(ebo_) {
+VertexArrayObject::VertexArrayObject(VboMap& vbos, ShaderProgram* const shader_program,
+                                     std::initializer_list<u32> _vbo_ids, std::initializer_list<VertexSpec> specs,
+                                     const ElementBufferObject ebo_)
+        : shader_program(shader_program), vbo_ids(_vbo_ids.begin(), _vbo_ids.end()), ebo(ebo_) {
 
     CHECK_F(vbo_ids.size() == specs.size());
 
@@ -245,7 +211,7 @@ VertexArrayObject::VertexArrayObject(ShaderProgram* const shader_program, std::i
     glBindVertexArray(id);
 
     for (u32 i = 0; i < vbo_ids.size(); ++i) {
-        auto& vbo = get_vbo(i);
+        auto& vbo = get_vbo(vbos, i);
         const VertexSpec spec = specs.begin()[i];
         vbo.bind();
         glVertexAttribPointer(spec.index, spec.size, spec.type, false, spec.stride,
@@ -258,8 +224,8 @@ VertexArrayObject::VertexArrayObject(ShaderProgram* const shader_program, std::i
     glBindVertexArray(0);
 }
 
-VertexBufferObject& VertexArrayObject::get_vbo(const u32 index) {
-    return vbos_ptr->at(vbo_ids[index]);
+VertexBufferObject& VertexArrayObject::get_vbo(VboMap& vbos, const u32 index) {
+    return vbos.at(vbo_ids[index]);
 }
 
 void VertexArrayObject::draw() {
@@ -275,10 +241,11 @@ void VertexArrayObject::destroy() {
     *this = VertexArrayObject();
 }
 
-Renderer::Renderer(AppState* const app_state) : app_state(app_state) {
+void Renderer::init(App* app) {
 
-    vbos_ptr = &vbos;
+    this->app = app;
 
+    CHECK_F(gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)));
     glfwSwapInterval(1);
 
     constexpr f32 bg_shade = 0.0f;
@@ -297,7 +264,7 @@ Renderer::Renderer(AppState* const app_state) : app_state(app_state) {
     {
         const char* const allowed_drivers_gpkg[] = {"GPKG", nullptr};
         GDALDataset* admin_1_fixed_ds = static_cast<GDALDataset*>(
-                GDALOpenEx(get_resource_path("gis/vector/admin_1_fixed.gpkg").c_str(),
+                GDALOpenEx(app->get_resource_path("gis/vector/admin_1_fixed.gpkg").c_str(),
                            GDAL_OF_VECTOR | GDAL_OF_READONLY, allowed_drivers_gpkg, nullptr, nullptr));
         CHECK_NOTNULL_F(admin_1_fixed_ds);
         DEFER([&] { GDALClose(admin_1_fixed_ds); });
@@ -379,7 +346,7 @@ Renderer::Renderer(AppState* const app_state) : app_state(app_state) {
         auto ebo = ElementBufferObject(GL_STATIC_DRAW, GL_TRIANGLES);
         ebo.buffer_elements_realloc(tri_indices.data(), static_cast<i32>(tri_indices.size()));
 
-        planet_vao = VertexArrayObject(&planet_prog, {vbo}, {spec}, ebo);
+        planet_vao = VertexArrayObject(vbos, &planet_prog, {vbo}, {spec}, ebo);
     }
 
     for (ShaderProgram* program : {&planet_prog}) {
@@ -387,45 +354,28 @@ Renderer::Renderer(AppState* const app_state) : app_state(app_state) {
     }
 }
 
-u32 Renderer::add_vbo(const GLenum usage) {
-    while (has_key(vbos, next_vbo_id)) {
-        ++next_vbo_id;
-    }
-
-    const u32 id = next_vbo_id;
-    ++next_vbo_id;
-    vbos.emplace(id, VertexBufferObject(usage));
-    return id;
-}
-
-void Renderer::erase_vbo(const u32 id) {
-    vbos.at(id).destroy();
-    vbos.erase(id);
-}
-
 void Renderer::render() {
 
-    if (app_state->wireframe_render) {
+    if (app->wireframe_render) {
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     } else {
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glViewport(0, 0, app_state->framebuffer_width, app_state->framebuffer_height);
+    glViewport(0, 0, app->framebuffer_width, app->framebuffer_height);
 
-    const glm::mat4 view = glm::lookAt(app_state->camera_pos, app_state->camera_target, app_state->camera_up);
-    const glm::mat4 projection = glm::perspective(app_state->fovy,
-                                                  static_cast<f32>(app_state->framebuffer_width) /
-                                                          static_cast<f32>(app_state->framebuffer_height),
-                                                  0.01f, 1000.0f);
+    const glm::mat4 view = glm::lookAt(app->camera_pos, app->camera_target, app->camera_up);
+    const glm::mat4 projection = glm::perspective(
+            app->fovy, static_cast<f32>(app->framebuffer_width) / static_cast<f32>(app->framebuffer_height), 0.01f,
+            1000.0f);
 
     const glm::mat4 vp = projection * view;
     view_projection_ubo.buffer_data(glm::value_ptr(vp), sizeof(vp));
 
     planet_vao.draw();
 
-    glfwSwapBuffers(app_state->window);
+    glfwSwapBuffers(app->window);
 
 #ifdef DEBUG
     switch (glGetError()) {
@@ -451,4 +401,50 @@ void Renderer::render() {
         ABORT_F("Unknown OpenGL error");
     }
 #endif
+}
+
+u32 Renderer::add_vbo(const GLenum usage) {
+    while (has_key(vbos, next_vbo_id)) {
+        ++next_vbo_id;
+    }
+
+    const u32 id = next_vbo_id;
+    ++next_vbo_id;
+    vbos.emplace(id, VertexBufferObject(usage));
+    return id;
+}
+
+void Renderer::erase_vbo(const u32 id) {
+    vbos.at(id).destroy();
+    vbos.erase(id);
+}
+
+u32 Renderer::compile_shader(const Path& relative_shader_path, const GLenum type) {
+    auto relative_path = Path("shaders/");
+    relative_path /= relative_shader_path;
+    const Path path = app->get_resource_path(relative_path);
+
+    std::ifstream stream(path);
+    CHECK_F(bool(stream));
+
+    std::stringstream source_buffer;
+    source_buffer << stream.rdbuf();
+    const std::string source = source_buffer.str();
+    const char* const source_c = source.c_str();
+
+    const u32 shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source_c, nullptr);
+    glCompileShader(shader);
+
+    i32 success;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        i32 len;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
+        std::vector<char> log(static_cast<size_t>(len));
+        glGetShaderInfoLog(shader, len, NULL, log.data());
+        ABORT_F("Shader compilation failed: {}", log.data());
+    }
+
+    return shader;
 }

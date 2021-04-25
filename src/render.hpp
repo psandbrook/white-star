@@ -1,13 +1,10 @@
 #pragma once
 
-#include <app_state.hpp>
 #include <utility.hpp>
 
 #include <glad/glad.h>
 
 #include <initializer_list>
-
-inline constexpr i32 render_samples = 8;
 
 struct GLBuffer {
 public:
@@ -98,6 +95,8 @@ struct VertexSpec {
     ptrdiff_t offset;
 };
 
+using VboMap = std::unordered_map<u32, VertexBufferObject>;
+
 struct VertexArrayObject {
     u32 id = 0;
     ShaderProgram* shader_program;
@@ -105,29 +104,32 @@ struct VertexArrayObject {
     ElementBufferObject ebo;
 
     VertexArrayObject() = default;
-    VertexArrayObject(ShaderProgram* shader_program, std::initializer_list<u32> vbo_ids,
+    VertexArrayObject(VboMap& vbos, ShaderProgram* shader_program, std::initializer_list<u32> vbo_ids,
                       std::initializer_list<VertexSpec> specs, ElementBufferObject ebo);
 
-    VertexBufferObject& get_vbo(u32 index);
+    VertexBufferObject& get_vbo(VboMap& vbos, u32 index);
     void draw();
     void destroy();
 };
 
+struct App;
+struct Path;
+
 struct Renderer {
-    AppState* app_state;
+    App* app;
 
     u32 next_vbo_id = 0;
-    std::unordered_map<u32, VertexBufferObject> vbos;
+    VboMap vbos;
 
     UniformBufferObject view_projection_ubo;
 
     ShaderProgram planet_prog;
     VertexArrayObject planet_vao;
 
-    Renderer() = default;
-    explicit Renderer(AppState* app_state);
+    void init(App* app);
 
     void render();
+    u32 compile_shader(const Path& relative_shader_path, GLenum type);
     u32 add_vbo(GLenum usage);
     void erase_vbo(u32 id);
 };

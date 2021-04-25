@@ -1,92 +1,82 @@
-#include <app_state.hpp>
-#include <filesystem.hpp>
-#include <render.hpp>
+#ifdef HOT_RELOAD
+    #include <dlfcn.h>
+
+    #include <filesystem>
+
+namespace fs = std::filesystem;
+
+#else
+    #include <app.hpp>
+#endif
+
 #include <utility.hpp>
-
-#include <GLFW/glfw3.h>
-#include <glad/glad.h>
-#include <ogrsf_frmts.h>
-
-namespace {
-
-const char* const app_name = "White Star";
-
-extern "C" void glfw_error_callback(int error_code, const char* description) {
-    ABORT_F("GLFW error {:#x}: {}", error_code, description);
-}
-} // namespace
 
 int main(int argc, char** argv) {
 
     loguru::init(argc, argv);
-    init_resource_path();
-    GDALAllRegister();
 
-    glfwSetErrorCallback(glfw_error_callback);
-    CHECK_F(glfwInit());
-    DEFER([] { glfwTerminate(); });
+#ifdef HOT_RELOAD
+    const char* const lib_name = "libwhite_star_lib.so";
 
-    GLFWwindow* window = nullptr;
-    {
-        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-        CHECK_NOTNULL_F(monitor);
+    using AppInitFn = void* (*)();
+    using AppDestroyFn = void (*)(void*);
+    using AppUpdateFn = int (*)(void*);
+    using AppLoadFn = void (*)(void*);
+    using AppUnloadFn = void (*)(void*);
 
-        const GLFWvidmode* video_mode = glfwGetVideoMode(monitor);
-        CHECK_NOTNULL_F(video_mode);
+    void* app_lib = nullptr;
+    AppInitFn app_init = nullptr;
+    AppDestroyFn app_destroy = nullptr;
+    AppUpdateFn app_update = nullptr;
+    AppLoadFn app_load = nullptr;
+    AppUnloadFn app_unload = nullptr;
 
-        glfwWindowHint(GLFW_RESIZABLE, true);
-        glfwWindowHint(GLFW_CENTER_CURSOR, false);
-        glfwWindowHint(GLFW_RED_BITS, video_mode->redBits);
-        glfwWindowHint(GLFW_GREEN_BITS, video_mode->greenBits);
-        glfwWindowHint(GLFW_BLUE_BITS, video_mode->blueBits);
-        glfwWindowHint(GLFW_REFRESH_RATE, video_mode->refreshRate);
-        glfwWindowHint(GLFW_SRGB_CAPABLE, true);
-        glfwWindowHint(GLFW_SAMPLES, render_samples);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        window = glfwCreateWindow(video_mode->width, video_mode->height, app_name, monitor, nullptr);
-        CHECK_NOTNULL_F(window);
+    std::error_code error_code;
+    fs::file_time_type last_lib_time = fs::last_write_time(lib_name, error_code);
 
-        glfwMakeContextCurrent(window);
+    auto load_app_lib = [&] {
+        app_lib = dlopen(lib_name, RTLD_NOW);
+        CHECK_NOTNULL_F(app_lib);
+        app_init = reinterpret_cast<AppInitFn>(dlsym(app_lib, "app_init"));
+        app_destroy = reinterpret_cast<AppDestroyFn>(dlsym(app_lib, "app_destroy"));
+        app_update = reinterpret_cast<AppUpdateFn>(dlsym(app_lib, "app_update"));
+        app_load = reinterpret_cast<AppLoadFn>(dlsym(app_lib, "app_load"));
+        app_unload = reinterpret_cast<AppUnloadFn>(dlsym(app_lib, "app_unload"));
+    };
 
-        CHECK_F(gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)));
-    }
+    auto unload_app_lib = [&] {
+        int result = dlclose(app_lib);
+        CHECK_F(result == 0);
+        app_lib = nullptr;
+        app_init = nullptr;
+        app_destroy = nullptr;
+        app_update = nullptr;
+        app_load = nullptr;
+        app_unload = nullptr;
+    };
 
-    auto app_state = AppState(window);
-    auto renderer = Renderer(&app_state);
+    load_app_lib();
+#endif
 
-    // Main loop
-    {
-        constexpr i32 updates_per_s = 60;
-        constexpr f64 update_s = 1.0 / updates_per_s;
-        const u64 counts_per_s = glfwGetTimerFrequency();
+    void* ptr = app_init();
+    DEFER([&] { app_destroy(ptr); });
 
-        f64 lag_s = 0.0;
-        u64 last_count = glfwGetTimerValue();
-
-        while (true) {
-            const u64 new_count = glfwGetTimerValue();
-            const f64 elapsed_s = static_cast<f64>(new_count - last_count) / static_cast<f64>(counts_per_s);
-            last_count = new_count;
-            lag_s += elapsed_s;
-
-            // Process input
-            if (app_state.process_events()) {
-                break;
-            }
-
-            // Update
-            i32 updates = 0;
-            while (lag_s >= update_s && updates < updates_per_s) {
-                app_state.update(update_s);
-                lag_s -= update_s;
-                ++updates;
-            }
-
-            // Render
-            renderer.render();
+    while (true) {
+        if (app_update(ptr)) {
+            break;
         }
+
+#ifdef HOT_RELOAD
+        fs::file_time_type new_lib_time = fs::last_write_time(lib_name, error_code);
+        if (new_lib_time > last_lib_time) {
+            app_unload(ptr);
+            unload_app_lib();
+
+            load_app_lib();
+            app_load(ptr);
+        }
+        last_lib_time = new_lib_time;
+#endif
     }
 
     return 0;
