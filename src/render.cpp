@@ -7,6 +7,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/mat4x4.hpp>
 #include <mapbox/earcut.hpp>
+#include <meshoptimizer.h>
 #include <ogrsf_frmts.h>
 
 #include <fstream>
@@ -305,7 +306,7 @@ void Renderer::init(App* app) {
                     polygon_vec.push_back(std::move(ring_vec));
                 }
 
-                std::vector<u32> poly_tri_indices = mapbox::earcut(polygon_vec);
+                std::vector<u32> poly_tri_indices = mapbox::earcut<u32>(polygon_vec);
                 u32 vertices_2d_offset = static_cast<u32>(vertices_2d.size());
                 for (const auto& ring : polygon_vec) {
                     for (const auto& point : ring) {
@@ -330,6 +331,27 @@ void Renderer::init(App* app) {
             vertices.push_back(glm::vec3(v));
         }
 
+        {
+            std::vector<u32> remap(vertices.size());
+            size_t new_vertices_size =
+                    meshopt_generateVertexRemap(remap.data(), tri_indices.data(), tri_indices.size(), vertices.data(),
+                                                vertices.size(), sizeof(vertices[0]));
+            CHECK_F(new_vertices_size <= vertices.size());
+            meshopt_remapIndexBuffer(tri_indices.data(), tri_indices.data(), tri_indices.size(), remap.data());
+            meshopt_remapVertexBuffer(vertices.data(), vertices.data(), vertices.size(), sizeof(vertices[0]),
+                                      remap.data());
+            vertices.resize(new_vertices_size);
+
+            meshopt_optimizeVertexCache(tri_indices.data(), tri_indices.data(), tri_indices.size(), vertices.size());
+
+            meshopt_optimizeOverdraw(tri_indices.data(), tri_indices.data(), tri_indices.size(),
+                                     reinterpret_cast<f32*>(vertices.data()), vertices.size(), sizeof(vertices[0]),
+                                     1.05f);
+
+            meshopt_optimizeVertexFetch(vertices.data(), tri_indices.data(), tri_indices.size(), vertices.data(),
+                                        vertices.size(), sizeof(vertices[0]));
+        }
+
         const u32 vert_shader = compile_shader("planet.vert", GL_VERTEX_SHADER);
         const u32 frag_shader = compile_shader("planet.frag", GL_FRAGMENT_SHADER);
         planet_prog = ShaderProgram(vert_shader, frag_shader);
@@ -347,6 +369,9 @@ void Renderer::init(App* app) {
 
         auto ebo = ElementBufferObject(GL_STATIC_DRAW, GL_TRIANGLES);
         ebo.buffer_elements_realloc(tri_indices.data(), static_cast<i32>(tri_indices.size()));
+
+        DEXPR(vertices.size());
+        DEXPR(tri_indices.size() / 3);
 
         planet_vao = VertexArrayObject(vbos, &planet_prog, {vbo}, {spec}, ebo);
     }

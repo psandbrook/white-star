@@ -208,6 +208,18 @@ set_target_property(${GLFW_TARGETS} PROPERTY COMPILE_OPTIONS "${COMPLETE_COMPILE
 set_target_property(${GLFW_TARGETS} PROPERTY LINK_OPTIONS
   "${COMPLETE_COMPILE_FLAGS}" ${COMPLETE_LINK_FLAGS} ${COMPILE_FLAGS_DEFAULT_OPT})
 
+# --- meshoptimizer ---
+
+set_cache_internal(MESHOPT_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+add_subdirectory(deps/meshoptimizer)
+get_targets(MESHOPTIMIZER_TARGETS deps/meshoptimizer)
+set_target_property(${MESHOPTIMIZER_TARGETS} PROPERTY COMPILE_OPTIONS "${COMPLETE_COMPILE_FLAGS}" ${COMPILE_FLAGS_DEFAULT_OPT})
+set_target_property(${MESHOPTIMIZER_TARGETS} PROPERTY LINK_OPTIONS
+  "${COMPLETE_COMPILE_FLAGS}" ${COMPLETE_LINK_FLAGS} ${COMPILE_FLAGS_DEFAULT_OPT})
+
+get_target_property(MESHOPTIMIZER_INCLUDE_DIRS meshoptimizer INTERFACE_INCLUDE_DIRECTORIES)
+set_target_property(meshoptimizer PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${MESHOPTIMIZER_INCLUDE_DIRS}")
+
 # --- fmt ---
 
 add_subdirectory(deps/fmt)
@@ -525,7 +537,7 @@ foreach(TARGET ${PROJECT_TARGETS})
   target_compile_options(${TARGET} PRIVATE ${PROJECT_COMPILE_FLAGS} ${CXX_WARNING_FLAGS})
   target_link_options(${TARGET} PRIVATE ${PROJECT_COMPILE_FLAGS} ${PROJECT_LINK_FLAGS} ${CXX_WARNING_FLAGS})
   target_compile_definitions(${TARGET} PRIVATE GLFW_INCLUDE_NONE)
-  target_link_libraries(${TARGET} glfw glad glm loguru fmt whereami gdal earcut)
+  target_link_libraries(${TARGET} glfw glad glm loguru fmt whereami gdal earcut meshoptimizer)
 endforeach()
 
 file(CREATE_LINK ${CMAKE_SOURCE_DIR}/data ${CMAKE_BINARY_DIR}/data SYMBOLIC)
