@@ -429,7 +429,7 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   list(APPEND GDAL_CONFIGURE_ARGS --disable-shared --enable-static --without-ld-shared --disable-rpath)
 endif()
 
-execute_process(COMMAND cp -alT ${CMAKE_SOURCE_DIR}/deps/gdal ${GDAL_SOURCE_DIR})
+execute_process(COMMAND cp -alTfu ${CMAKE_SOURCE_DIR}/deps/gdal ${GDAL_SOURCE_DIR})
 
 ExternalProject_Add(gdal_ep
   SOURCE_DIR ${GDAL_SOURCE_DIR}
