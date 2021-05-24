@@ -144,6 +144,7 @@ void App::init() {
     CHECK_NOTNULL_F(video_mode);
 
     glfwWindowHint(GLFW_RESIZABLE, true);
+    glfwWindowHint(GLFW_MAXIMIZED, true);
     glfwWindowHint(GLFW_CENTER_CURSOR, false);
     glfwWindowHint(GLFW_RED_BITS, video_mode->redBits);
     glfwWindowHint(GLFW_GREEN_BITS, video_mode->greenBits);
@@ -154,7 +155,7 @@ void App::init() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    window = glfwCreateWindow(video_mode->width, video_mode->height, app_name, monitor, nullptr);
+    window = glfwCreateWindow(video_mode->width, video_mode->height, app_name, nullptr, nullptr);
     CHECK_NOTNULL_F(window);
 
     glfwMakeContextCurrent(window);
