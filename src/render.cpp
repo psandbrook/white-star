@@ -13,6 +13,8 @@
 #include <fstream>
 #include <sstream>
 
+namespace fs = std::filesystem;
+
 GLBuffer::GLBuffer(const GLenum type, const GLenum usage) : type(type), usage(usage) {
     glGenBuffers(1, &id);
     bind();
@@ -65,12 +67,15 @@ UniformBufferObject::UniformBufferObject(const char* const name, const u32 bindi
     glBindBufferBase(GL_UNIFORM_BUFFER, binding, id);
 }
 
-ShaderProgram::ShaderProgram(const u32 vertex_shader, const u32 fragment_shader) {
+ShaderProgram::ShaderProgram(const Shader& vertex_shader, const Shader& fragment_shader) {
     id = glCreateProgram();
-    glAttachShader(id, vertex_shader);
-    glAttachShader(id, fragment_shader);
-    glLinkProgram(id);
+    glAttachShader(id, vertex_shader.id);
+    glAttachShader(id, fragment_shader.id);
+    reload();
+}
 
+void ShaderProgram::reload() {
+    glLinkProgram(id);
     i32 success;
     glGetProgramiv(id, GL_LINK_STATUS, &success);
     if (!success) {
@@ -78,21 +83,13 @@ ShaderProgram::ShaderProgram(const u32 vertex_shader, const u32 fragment_shader)
         glGetProgramiv(id, GL_INFO_LOG_LENGTH, &len);
         std::vector<char> log(static_cast<size_t>(len));
         glGetProgramInfoLog(id, len, NULL, log.data());
-        ABORT_F("Program linking failed: {}", log.data());
+        LOG_F(ERROR, "Program linking failed: {}", log.data());
     }
 }
 
 i32 ShaderProgram::get_location(const char* const name) {
-    auto it = uniform_locations.find(name);
-    i32 result;
-    if (it == uniform_locations.end()) {
-        result = glGetUniformLocation(id, name);
-        CHECK_F(result != -1);
-        uniform_locations.emplace(name, result);
-    } else {
-        result = it->second;
-    }
-
+    i32 result = glGetUniformLocation(id, name);
+    CHECK_F(result != -1);
     return result;
 }
 
@@ -352,9 +349,9 @@ void Renderer::init(App* app) {
                                         vertices.size(), sizeof(vertices[0]));
         }
 
-        const u32 vert_shader = compile_shader("planet.vert", GL_VERTEX_SHADER);
-        const u32 frag_shader = compile_shader("planet.frag", GL_FRAGMENT_SHADER);
-        planet_prog = ShaderProgram(vert_shader, frag_shader);
+        planet_vert = make_shader("planet.vert", GL_VERTEX_SHADER);
+        planet_frag = make_shader("planet.frag", GL_FRAGMENT_SHADER);
+        planet_prog = ShaderProgram(planet_vert, planet_frag);
 
         const u32 vbo = add_vbo(GL_STATIC_DRAW);
         const VertexSpec spec = {
@@ -383,6 +380,14 @@ void Renderer::init(App* app) {
 
 void Renderer::render() {
 
+    {
+        bool result_1 = reload_shader(planet_vert);
+        bool result_2 = reload_shader(planet_frag);
+        if (result_1 || result_2) {
+            planet_prog.reload();
+        }
+    }
+
     if (app->wireframe_render) {
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     } else {
@@ -410,22 +415,28 @@ void Renderer::render() {
         break;
 
     case GL_INVALID_ENUM:
-        ABORT_F("GL_INVALID_ENUM");
+        LOG_F(ERROR, "GL_INVALID_ENUM");
+        break;
 
     case GL_INVALID_VALUE:
-        ABORT_F("GL_INVALID_VALUE");
+        LOG_F(ERROR, "GL_INVALID_VALUE");
+        break;
 
     case GL_INVALID_OPERATION:
-        ABORT_F("GL_INVALID_OPERATION");
+        LOG_F(ERROR, "GL_INVALID_OPERATION");
+        break;
 
     case GL_INVALID_FRAMEBUFFER_OPERATION:
-        ABORT_F("GL_INVALID_FRAMEBUFFER_OPERATION");
+        LOG_F(ERROR, "GL_INVALID_FRAMEBUFFER_OPERATION");
+        break;
 
     case GL_OUT_OF_MEMORY:
-        ABORT_F("GL_OUT_OF_MEMORY");
+        LOG_F(ERROR, "GL_OUT_OF_MEMORY");
+        break;
 
     default:
-        ABORT_F("Unknown OpenGL error");
+        LOG_F(ERROR, "Unknown OpenGL error");
+        break;
     }
 #endif
 }
@@ -446,32 +457,42 @@ void Renderer::erase_vbo(const u32 id) {
     vbos.erase(id);
 }
 
-u32 Renderer::compile_shader(const Path& relative_shader_path, const GLenum type) {
-    auto relative_path = Path("shaders/");
-    relative_path /= relative_shader_path;
-    const Path path = app->get_resource_path(relative_path);
+Shader Renderer::make_shader(const Path& shader_path, const GLenum type) {
+    auto resource_path = Path("shaders/");
+    resource_path /= shader_path;
 
-    std::ifstream stream(path);
-    CHECK_F(bool(stream));
+    Shader result = {
+            .id = glCreateShader(type),
+            .path = app->get_resource_path(resource_path),
+    };
 
-    std::stringstream source_buffer;
-    source_buffer << stream.rdbuf();
-    const std::string source = source_buffer.str();
-    const char* const source_c = source.c_str();
+    reload_shader(result);
+    return result;
+}
 
-    const u32 shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source_c, nullptr);
-    glCompileShader(shader);
+bool Renderer::reload_shader(Shader& shader) {
+    auto new_time = fs::last_write_time(shader.path);
+    if (new_time > shader.last_time) {
 
-    i32 success;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        i32 len;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
-        std::vector<char> log(static_cast<size_t>(len));
-        glGetShaderInfoLog(shader, len, NULL, log.data());
-        ABORT_F("Shader compilation failed: {}", log.data());
+        const std::string source = read_file(shader.path);
+        const char* const source_c = source.c_str();
+
+        glShaderSource(shader.id, 1, &source_c, nullptr);
+        glCompileShader(shader.id);
+
+        i32 success;
+        glGetShaderiv(shader.id, GL_COMPILE_STATUS, &success);
+        if (!success) {
+            i32 len;
+            glGetShaderiv(shader.id, GL_INFO_LOG_LENGTH, &len);
+            std::vector<char> log(static_cast<size_t>(len));
+            glGetShaderInfoLog(shader.id, len, NULL, log.data());
+            LOG_F(ERROR, "Shader compilation failed: {}", log.data());
+        }
+
+        shader.last_time = new_time;
+        return true;
+    } else {
+        return false;
     }
-
-    return shader;
 }

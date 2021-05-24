@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem.hpp>
 #include <utility.hpp>
 
 #include <glad/glad.h>
@@ -69,12 +70,17 @@ struct Framebuffer {
     void destroy();
 };
 
+struct Shader {
+    u32 id = 0;
+    Path path;
+    std::filesystem::file_time_type last_time = std::filesystem::file_time_type::min();
+};
+
 struct ShaderProgram {
-    u32 id;
-    std::unordered_map<const char*, i32, CStrHash, CStrEqual> uniform_locations;
+    u32 id = 0;
 
     ShaderProgram() = default;
-    ShaderProgram(u32 vertex_shader, u32 fragment_shader);
+    ShaderProgram(const Shader& vertex_shader, const Shader& fragment_shader);
 
     void set_uniform_f32(const char* name, f32 value);
     void set_uniform_i32(const char* name, i32 value);
@@ -86,6 +92,7 @@ struct ShaderProgram {
     i32 get_location(const char* name);
     void bind_uniform_block(const UniformBufferObject& ubo);
     void use();
+    void reload();
 };
 
 struct VertexSpec {
@@ -114,7 +121,6 @@ struct VertexArrayObject {
 };
 
 struct App;
-struct Path;
 
 struct Renderer {
     App* app;
@@ -124,13 +130,17 @@ struct Renderer {
 
     UniformBufferObject view_projection_ubo;
 
+    Shader planet_vert;
+    Shader planet_frag;
+
     ShaderProgram planet_prog;
     VertexArrayObject planet_vao;
 
     void init(App* app);
 
     void render();
-    u32 compile_shader(const Path& relative_shader_path, GLenum type);
     u32 add_vbo(GLenum usage);
     void erase_vbo(u32 id);
+    Shader make_shader(const Path& shader_path, GLenum type);
+    bool reload_shader(Shader& shader);
 };

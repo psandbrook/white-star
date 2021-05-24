@@ -1,14 +1,12 @@
 #pragma once
 
+#include <filesystem.hpp>
 #include <render.hpp>
 #include <utility.hpp>
 
 #include <GLFW/glfw3.h>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
-
-#include <filesystem>
-#include <string>
 
 inline constexpr i32 render_samples = 8;
 
@@ -23,13 +21,6 @@ void app_load(void* ptr);
 void app_unload(void* ptr);
 #endif
 }
-
-struct Path : public std::filesystem::path {
-    Path() = default;
-    Path(const char* const str) : std::filesystem::path(std::filesystem::u8path(str)) {}
-    Path(const std::string& str) : std::filesystem::path(std::filesystem::u8path(str)) {}
-    Path(std::filesystem::path path) : std::filesystem::path(std::move(path)) {}
-};
 
 struct App {
     GLFWwindow* window;

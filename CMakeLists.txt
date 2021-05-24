@@ -487,6 +487,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_library(white_star_lib
     src/app.cpp
     src/render.cpp
+    src/filesystem.cpp
   )
 
   add_executable(white_star src/main.cpp)
@@ -528,6 +529,7 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     src/main.cpp
     src/app.cpp
     src/render.cpp
+    src/filesystem.cpp
   )
   set(PROJECT_TARGETS white_star)
 endif()

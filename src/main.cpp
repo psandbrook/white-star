@@ -31,8 +31,7 @@ int main(int argc, char** argv) {
     AppLoadFn app_load = nullptr;
     AppUnloadFn app_unload = nullptr;
 
-    std::error_code error_code;
-    fs::file_time_type last_lib_time = fs::last_write_time(lib_name, error_code);
+    fs::file_time_type last_lib_time = fs::last_write_time(lib_name);
 
     auto load_app_lib = [&] {
         app_lib = dlopen(lib_name, RTLD_NOW);
@@ -67,7 +66,8 @@ int main(int argc, char** argv) {
         }
 
 #ifdef HOT_RELOAD
-        fs::file_time_type new_lib_time = fs::last_write_time(lib_name, error_code);
+        std::error_code error;
+        fs::file_time_type new_lib_time = fs::last_write_time(lib_name, error);
         if (new_lib_time > last_lib_time) {
             app_unload(ptr);
             unload_app_lib();
