@@ -6,10 +6,10 @@
 namespace fs = std::filesystem;
 
 #else
-    #include <app.hpp>
+    #include "app.hpp"
 #endif
 
-#include <utility.hpp>
+#include "utility.hpp"
 
 int main(int argc, char** argv) {
 

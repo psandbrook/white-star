@@ -1,8 +1,8 @@
 #pragma once
 
-#include <filesystem.hpp>
-#include <render.hpp>
-#include <utility.hpp>
+#include "filesystem.hpp"
+#include "render.hpp"
+#include "utility.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/trigonometric.hpp>
