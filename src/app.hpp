@@ -56,3 +56,5 @@ struct App {
 
     Path get_resource_path(const Path& path);
 };
+
+extern App* app;

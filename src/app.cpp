@@ -15,17 +15,11 @@ App* get_app(void* ptr) {
     return static_cast<App*>(ptr);
 }
 
-App* get_app(GLFWwindow* const window) {
-    return static_cast<App*>(glfwGetWindowUserPointer(window));
-}
-
 extern "C" void glfw_error_callback(int error_code, const char* description) {
     ABORT_F("GLFW error {:#x}: {}", error_code, description);
 }
 
 extern "C" void glfw_key_callback(GLFWwindow* window, int key, int /* scancode */, int action, int /* mods */) {
-    App* const app = get_app(window);
-
     switch (key) {
     case GLFW_KEY_ESCAPE: {
         if (action == GLFW_PRESS) {
@@ -42,8 +36,6 @@ extern "C" void glfw_key_callback(GLFWwindow* window, int key, int /* scancode *
 }
 
 extern "C" void glfw_cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
-    App* const app = get_app(window);
-
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
         constexpr f64 factor = 0.001;
 
@@ -64,16 +56,14 @@ extern "C" void glfw_cursor_pos_callback(GLFWwindow* window, double xpos, double
     app->cursor_ypos = ypos;
 }
 
-extern "C" void glfw_scroll_callback(GLFWwindow* window, double /* xoffset */, double yoffset) {
-    App* const app = get_app(window);
+extern "C" void glfw_scroll_callback(GLFWwindow* /* window */, double /* xoffset */, double yoffset) {
     const f64 distance = yoffset * 0.1 * static_cast<f64>(glm::length(app->camera_target - app->camera_pos));
     const glm::vec3 front = glm::normalize(app->camera_target - app->camera_pos);
     const glm::mat4 mat = glm::translate(glm::mat4(1.0f), static_cast<f32>(distance) * front);
     app->camera_pos = glm::vec3(mat * glm::vec4(app->camera_pos, 1.0f));
 }
 
-extern "C" void glfw_framebuffer_size_callback(GLFWwindow* window, int width, int height) {
-    App* const app = get_app(window);
+extern "C" void glfw_framebuffer_size_callback(GLFWwindow* /* window */, int width, int height) {
     app->framebuffer_width = width;
     app->framebuffer_height = height;
 }
@@ -119,6 +109,8 @@ void app_unload(void* ptr) {
 
 void App::init() {
 
+    app = this;
+
     {
         const int size = wai_getExecutablePath(nullptr, 0, nullptr);
         CHECK_F(size != -1);
@@ -160,17 +152,16 @@ void App::init() {
 
     glfwMakeContextCurrent(window);
 
-    glfwSetWindowUserPointer(window, this);
-
     glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
     glfwGetCursorPos(window, &cursor_xpos, &cursor_ypos);
 
-    renderer.init(this);
+    renderer.init();
 
     load();
 }
 
 void App::load() {
+    app = this;
     glfwSetErrorCallback(glfw_error_callback);
     glfwSetKeyCallback(window, glfw_key_callback);
     glfwSetCursorPosCallback(window, glfw_cursor_pos_callback);
@@ -220,3 +211,5 @@ Path App::get_resource_path(const Path& path) {
     result /= path;
     return result;
 }
+
+App* app = nullptr;

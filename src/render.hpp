@@ -7,6 +7,7 @@
 #include <glm/vec3.hpp>
 
 #include <initializer_list>
+#include <unordered_map>
 
 struct GLBuffer {
 public:
@@ -74,6 +75,11 @@ struct Shader {
     u32 id = 0;
     Path path;
     std::filesystem::file_time_type last_time = std::filesystem::file_time_type::min();
+
+    Shader() = default;
+    Shader(const Path& shader_path, GLenum type);
+
+    bool load();
 };
 
 struct ShaderProgram {
@@ -92,7 +98,7 @@ struct ShaderProgram {
     i32 get_location(const char* name);
     void bind_uniform_block(const UniformBufferObject& ubo);
     void use();
-    void reload();
+    void load();
 };
 
 struct VertexSpec {
@@ -103,8 +109,6 @@ struct VertexSpec {
     ptrdiff_t offset;
 };
 
-using VboMap = std::unordered_map<u32, VertexBufferObject>;
-
 struct VertexArrayObject {
     u32 id = 0;
     ShaderProgram* shader_program;
@@ -112,23 +116,20 @@ struct VertexArrayObject {
     ElementBufferObject ebo;
 
     VertexArrayObject() = default;
-    VertexArrayObject(VboMap& vbos, ShaderProgram* shader_program, std::initializer_list<u32> vbo_ids,
+    VertexArrayObject(ShaderProgram* shader_program, std::initializer_list<u32> vbo_ids,
                       std::initializer_list<VertexSpec> specs, ElementBufferObject ebo);
 
-    VertexBufferObject& get_vbo(VboMap& vbos, u32 index);
+    VertexBufferObject& get_vbo(u32 index);
     void draw();
     void destroy();
 };
 
-struct App;
-
 struct Renderer {
-    App* app;
-
-    u32 next_vbo_id = 0;
-    VboMap vbos;
+    std::unordered_map<u32, VertexBufferObject> vbos;
 
     UniformBufferObject view_projection_ubo;
+
+    std::unordered_multimap<u32, ShaderProgram*> shader_users;
 
     Shader planet_vert;
     Shader planet_frag;
@@ -136,11 +137,9 @@ struct Renderer {
     ShaderProgram planet_prog;
     VertexArrayObject planet_vao;
 
-    void init(App* app);
+    void init();
 
     void render();
     u32 add_vbo(GLenum usage);
     void erase_vbo(u32 id);
-    Shader make_shader(const Path& shader_path, GLenum type);
-    bool reload_shader(Shader& shader);
 };
