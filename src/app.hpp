@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 #include <glm/trigonometric.hpp>
 #include <glm/vec3.hpp>
+#include <ogrsf_frmts.h>
 
 inline constexpr i32 render_samples = 8;
 
@@ -43,6 +44,11 @@ struct App {
     f32 fovy = glm::radians(60.0f);
 
     bool wireframe_render = false;
+
+    GDALDataset* admin_1_fixed_ds = nullptr;
+    OGRLayer* admin_1_fixed_l = nullptr;
+
+    i64 selected_province = -1;
 
     void init();
     void load();

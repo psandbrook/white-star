@@ -8,7 +8,6 @@
 #include <glm/mat4x4.hpp>
 #include <mapbox/earcut.hpp>
 #include <meshoptimizer.h>
-#include <ogrsf_frmts.h>
 
 #include <fstream>
 #include <sstream>
@@ -250,42 +249,45 @@ void Renderer::init() {
     glClearColor(bg_shade, bg_shade, bg_shade, 1.0f);
 
     glDisable(GL_DITHER);
+
     glEnable(GL_MULTISAMPLE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_FRAMEBUFFER_SRGB);
     glEnable(GL_DEPTH_TEST);
     // glEnable(GL_CULL_FACE);
 
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glEnable(GL_POLYGON_OFFSET_LINE);
+    glPolygonOffset(-1.0f, -1.0f);
+
+    glEnable(GL_LINE_SMOOTH);
+    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+    glLineWidth(1.0f);
+
     view_projection_ubo = UniformBufferObject("ViewProjection", 0, GL_STREAM_DRAW);
 
+    std::vector<glm::vec3> vertices;
+    std::vector<u32> tri_indices;
+    std::vector<u32> line_indices;
     {
-        const char* const allowed_drivers_gpkg[] = {"GPKG", nullptr};
-        GDALDataset* admin_1_fixed_ds = static_cast<GDALDataset*>(
-                GDALOpenEx(app->get_resource_path("gis/vector/admin_1_fixed.gpkg").c_str(),
-                           GDAL_OF_VECTOR | GDAL_OF_READONLY, allowed_drivers_gpkg, nullptr, nullptr));
-        CHECK_NOTNULL_F(admin_1_fixed_ds);
-        DEFER([&] { GDALClose(admin_1_fixed_ds); });
-
-        OGRLayer* admin_1_fixed_l = admin_1_fixed_ds->GetLayerByName("admin_1_fixed");
-        // OGRSpatialReference* spatial_ref = admin_1_fixed_l->GetSpatialRef();
-
         using Point = std::array<f64, 2>;
         using Polygon = std::vector<std::vector<Point>>;
-        std::vector<Point> vertices_2d;
-        std::vector<u32> tri_indices;
+        Polygon polygon_vec;
 
-        for (auto& feature : admin_1_fixed_l) {
+        for (auto& feature : app->admin_1_fixed_l) {
             CHECK_F(feature->GetGeomFieldCount() == 1);
+
             OGRGeometry* geom = feature->GetGeometryRef();
             CHECK_F(geom->getGeometryType() == wkbMultiPolygon);
+
             OGRMultiPolygon* multi_poly = geom->toMultiPolygon();
             CHECK_F(multi_poly->getNumGeometries() > 0);
 
             for (auto& poly : multi_poly) {
                 CHECK_NOTNULL_F(poly->getExteriorRing());
+                polygon_vec.clear();
 
-                Polygon polygon_vec;
                 for (auto& ring : poly) {
                     CHECK_F(ring->getNumPoints() > 0);
 
@@ -302,81 +304,83 @@ void Renderer::init() {
                 }
 
                 std::vector<u32> poly_tri_indices = mapbox::earcut<u32>(polygon_vec);
-                u32 vertices_2d_offset = static_cast<u32>(vertices_2d.size());
+                CHECK_F(poly_tri_indices.size() % 3 == 0);
+
+                u32 tri_vertices_offset = static_cast<u32>(vertices.size());
+
                 for (const auto& ring : polygon_vec) {
+                    u32 line_vertices_offset = static_cast<u32>(vertices.size());
+                    bool first_vertex = true;
+
                     for (const auto& point : ring) {
-                        vertices_2d.push_back(point);
+                        const f64 longitude = point[0];
+                        const f64 latitude = point[1];
+                        const f64 azimuth = glm::radians(-longitude + 180);
+                        const f64 inclination = glm::radians(-latitude + 90);
+                        const glm::dvec3 v = {std::sin(inclination) * std::cos(azimuth), std::cos(inclination),
+                                              std::sin(inclination) * std::sin(azimuth)};
+
+                        u32 i = static_cast<u32>(vertices.size());
+                        if (first_vertex) {
+                            line_indices.push_back(i);
+                            first_vertex = false;
+                        } else {
+                            line_indices.push_back(i);
+                            line_indices.push_back(i);
+                        }
+                        vertices.push_back(glm::vec3(v));
                     }
+                    line_indices.push_back(line_vertices_offset);
                 }
 
                 for (u32 index : poly_tri_indices) {
-                    tri_indices.push_back(index + vertices_2d_offset);
+                    tri_indices.push_back(index + tri_vertices_offset);
                 }
             }
         }
-
-        std::vector<glm::vec3> vertices;
-        for (const auto& point : vertices_2d) {
-            const f64 longitude = point[0];
-            const f64 latitude = point[1];
-            const f64 azimuth = glm::radians(-longitude + 180);
-            const f64 inclination = glm::radians(-latitude + 90);
-            const glm::dvec3 v = {std::sin(inclination) * std::cos(azimuth), std::cos(inclination),
-                                  std::sin(inclination) * std::sin(azimuth)};
-            vertices.push_back(glm::vec3(v));
-        }
-
-        {
-            std::vector<u32> remap(vertices.size());
-            size_t new_vertices_size =
-                    meshopt_generateVertexRemap(remap.data(), tri_indices.data(), tri_indices.size(), vertices.data(),
-                                                vertices.size(), sizeof(vertices[0]));
-            CHECK_F(new_vertices_size <= vertices.size());
-            meshopt_remapIndexBuffer(tri_indices.data(), tri_indices.data(), tri_indices.size(), remap.data());
-            meshopt_remapVertexBuffer(vertices.data(), vertices.data(), vertices.size(), sizeof(vertices[0]),
-                                      remap.data());
-            vertices.resize(new_vertices_size);
-
-            meshopt_optimizeVertexCache(tri_indices.data(), tri_indices.data(), tri_indices.size(), vertices.size());
-
-            meshopt_optimizeOverdraw(tri_indices.data(), tri_indices.data(), tri_indices.size(),
-                                     reinterpret_cast<f32*>(vertices.data()), vertices.size(), sizeof(vertices[0]),
-                                     1.05f);
-
-            meshopt_optimizeVertexFetch(vertices.data(), tri_indices.data(), tri_indices.size(), vertices.data(),
-                                        vertices.size(), sizeof(vertices[0]));
-        }
-
-        planet_vert = Shader("planet.vert", GL_VERTEX_SHADER);
-        planet_frag = Shader("planet.frag", GL_FRAGMENT_SHADER);
-        planet_prog = ShaderProgram(planet_vert, planet_frag);
-
-        const u32 vbo = add_vbo(GL_STATIC_DRAW);
-        const VertexSpec spec = {
-                .index = 0,
-                .size = 3,
-                .type = GL_FLOAT,
-                .stride = 3 * sizeof(f32),
-                .offset = 0,
-        };
-
-        vbos.at(vbo).buffer_data_realloc(vertices.data(), static_cast<GLsizeiptr>(vertices.size() * sizeof(glm::vec3)));
-
-        auto ebo = ElementBufferObject(GL_STATIC_DRAW, GL_TRIANGLES);
-        ebo.buffer_elements_realloc(tri_indices.data(), static_cast<i32>(tri_indices.size()));
-
-        DEXPR(vertices.size());
-        DEXPR(tri_indices.size() / 3);
-
-        planet_vao = VertexArrayObject(&planet_prog, {vbo}, {spec}, ebo);
     }
 
-    for (ShaderProgram* program : {&planet_prog}) {
+    CHECK_F(tri_indices.size() % 3 == 0);
+    CHECK_F(line_indices.size() % 2 == 0);
+    DEXPR(vertices.size());
+    DEXPR(tri_indices.size() / 3);
+    DEXPR(line_indices.size() / 2);
+
+    planet_vert = Shader("planet.vert", GL_VERTEX_SHADER);
+    planet_frag = Shader("planet.frag", GL_FRAGMENT_SHADER);
+    planet_prog = ShaderProgram(planet_vert, planet_frag);
+
+    outline_frag = Shader("outline.frag", GL_FRAGMENT_SHADER);
+    outline_prog = ShaderProgram(planet_vert, outline_frag);
+
+    const u32 planet_vbo = add_vbo(GL_STATIC_DRAW);
+    const VertexSpec planet_spec = {
+            .index = 0,
+            .size = 3,
+            .type = GL_FLOAT,
+            .stride = 3 * sizeof(f32),
+            .offset = 0,
+    };
+
+    vbos.at(planet_vbo)
+            .buffer_data_realloc(vertices.data(), static_cast<GLsizeiptr>(vertices.size() * sizeof(glm::vec3)));
+
+    auto planet_ebo = ElementBufferObject(GL_STATIC_DRAW, GL_TRIANGLES);
+    planet_ebo.buffer_elements_realloc(tri_indices.data(), static_cast<i32>(tri_indices.size()));
+    planet_vao = VertexArrayObject(&planet_prog, {planet_vbo}, {planet_spec}, planet_ebo);
+
+    auto outline_ebo = ElementBufferObject(GL_STATIC_DRAW, GL_LINES);
+    outline_ebo.buffer_elements_realloc(line_indices.data(), static_cast<i32>(line_indices.size()));
+    outline_vao = VertexArrayObject(&outline_prog, {planet_vbo}, {planet_spec}, outline_ebo);
+
+    for (ShaderProgram* program : {&planet_prog, &outline_prog}) {
         program->bind_uniform_block(view_projection_ubo);
     }
 
     shader_users.emplace(planet_vert.id, &planet_prog);
     shader_users.emplace(planet_frag.id, &planet_prog);
+    shader_users.emplace(planet_vert.id, &outline_prog);
+    shader_users.emplace(outline_frag.id, &outline_prog);
 }
 
 void Renderer::render() {
@@ -392,6 +396,12 @@ void Renderer::render() {
         }
         if (planet_frag.load()) {
             auto range = shader_users.equal_range(planet_frag.id);
+            for (auto it = range.first; it != range.second; ++it) {
+                programs_to_load.insert(it->second);
+            }
+        }
+        if (outline_frag.load()) {
+            auto range = shader_users.equal_range(outline_frag.id);
             for (auto it = range.first; it != range.second; ++it) {
                 programs_to_load.insert(it->second);
             }
@@ -420,6 +430,7 @@ void Renderer::render() {
     view_projection_ubo.buffer_data(glm::value_ptr(vp), sizeof(vp));
 
     planet_vao.draw();
+    outline_vao.draw();
 
     glfwSwapBuffers(app->window);
 

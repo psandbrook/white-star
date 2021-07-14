@@ -133,9 +133,13 @@ struct Renderer {
 
     Shader planet_vert;
     Shader planet_frag;
+    Shader outline_frag;
 
     ShaderProgram planet_prog;
+    ShaderProgram outline_prog;
+
     VertexArrayObject planet_vao;
+    VertexArrayObject outline_vao;
 
     void init();
 
