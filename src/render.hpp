@@ -111,12 +111,12 @@ struct VertexSpec {
 
 struct VertexArrayObject {
     u32 id = 0;
-    ShaderProgram* shader_program;
+    u32 shader_program_id;
     std::vector<u32> vbo_ids;
     ElementBufferObject ebo;
 
     VertexArrayObject() = default;
-    VertexArrayObject(ShaderProgram* shader_program, std::initializer_list<u32> vbo_ids,
+    VertexArrayObject(u32 shader_program_id, std::initializer_list<u32> vbo_ids,
                       std::initializer_list<VertexSpec> specs, ElementBufferObject ebo);
 
     VertexBufferObject& get_vbo(u32 index);
@@ -129,21 +129,19 @@ struct Renderer {
 
     UniformBufferObject view_projection_ubo;
 
-    std::unordered_multimap<u32, ShaderProgram*> shader_users;
-
-    Shader planet_vert;
-    Shader planet_frag;
-    Shader outline_frag;
-
-    ShaderProgram planet_prog;
-    ShaderProgram outline_prog;
+    std::unordered_map<u32, Shader> shaders;
+    std::unordered_map<u32, ShaderProgram> shader_programs;
+    std::unordered_multimap<u32, u32> shader_users;
 
     VertexArrayObject planet_vao;
     VertexArrayObject outline_vao;
 
     void init();
-
     void render();
+
     u32 add_vbo(GLenum usage);
     void erase_vbo(u32 id);
+
+    u32 add_shader(const Path& shader_path, GLenum type);
+    u32 add_shader_program(u32 vertex_shader, u32 fragment_shader);
 };

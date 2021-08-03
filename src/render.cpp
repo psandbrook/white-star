@@ -67,6 +67,40 @@ UniformBufferObject::UniformBufferObject(const char* const name, const u32 bindi
     glBindBufferBase(GL_UNIFORM_BUFFER, binding, id);
 }
 
+Shader::Shader(const Path& shader_path, const GLenum type) : id(glCreateShader(type)) {
+    auto resource_path = Path("shaders/");
+    resource_path /= shader_path;
+    path = app->get_resource_path(resource_path);
+    load();
+}
+
+bool Shader::load() {
+    auto new_time = fs::last_write_time(path);
+    if (new_time > last_time) {
+
+        const std::string source = read_file(path);
+        const char* const source_c = source.c_str();
+
+        glShaderSource(id, 1, &source_c, nullptr);
+        glCompileShader(id);
+
+        i32 success;
+        glGetShaderiv(id, GL_COMPILE_STATUS, &success);
+        if (!success) {
+            i32 len;
+            glGetShaderiv(id, GL_INFO_LOG_LENGTH, &len);
+            std::vector<char> log(static_cast<size_t>(len));
+            glGetShaderInfoLog(id, len, NULL, log.data());
+            LOG_F(ERROR, "Shader compilation failed: {}", log.data());
+        }
+
+        last_time = new_time;
+        return true;
+    } else {
+        return false;
+    }
+}
+
 ShaderProgram::ShaderProgram(const Shader& vertex_shader, const Shader& fragment_shader) {
     id = glCreateProgram();
     glAttachShader(id, vertex_shader.id);
@@ -197,9 +231,9 @@ void Framebuffer::destroy() {
     *this = Framebuffer();
 }
 
-VertexArrayObject::VertexArrayObject(ShaderProgram* const shader_program, std::initializer_list<u32> _vbo_ids,
+VertexArrayObject::VertexArrayObject(const u32 shader_program_id, std::initializer_list<u32> _vbo_ids,
                                      std::initializer_list<VertexSpec> specs, const ElementBufferObject _ebo)
-        : shader_program(shader_program), vbo_ids(_vbo_ids.begin(), _vbo_ids.end()), ebo(_ebo) {
+        : shader_program_id(shader_program_id), vbo_ids(_vbo_ids.begin(), _vbo_ids.end()), ebo(_ebo) {
 
     CHECK_F(vbo_ids.size() == specs.size());
 
@@ -228,7 +262,7 @@ VertexBufferObject& VertexArrayObject::get_vbo(const u32 index) {
 }
 
 void VertexArrayObject::draw() {
-    shader_program->use();
+    app->renderer.shader_programs.at(shader_program_id).use();
     glBindVertexArray(id);
     glDrawElements(ebo.primitive, ebo.count, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
@@ -346,12 +380,12 @@ void Renderer::init() {
     DEXPR(tri_indices.size() / 3);
     DEXPR(line_indices.size() / 2);
 
-    planet_vert = Shader("planet.vert", GL_VERTEX_SHADER);
-    planet_frag = Shader("planet.frag", GL_FRAGMENT_SHADER);
-    planet_prog = ShaderProgram(planet_vert, planet_frag);
+    u32 planet_vert = add_shader("planet.vert", GL_VERTEX_SHADER);
+    u32 planet_frag = add_shader("planet.frag", GL_FRAGMENT_SHADER);
+    u32 planet_prog = add_shader_program(planet_vert, planet_frag);
 
-    outline_frag = Shader("outline.frag", GL_FRAGMENT_SHADER);
-    outline_prog = ShaderProgram(planet_vert, outline_frag);
+    u32 outline_frag = add_shader("outline.frag", GL_FRAGMENT_SHADER);
+    u32 outline_prog = add_shader_program(planet_vert, outline_frag);
 
     const u32 planet_vbo = add_vbo(GL_STATIC_DRAW);
     const VertexSpec planet_spec = {
@@ -367,48 +401,34 @@ void Renderer::init() {
 
     auto planet_ebo = ElementBufferObject(GL_STATIC_DRAW, GL_TRIANGLES);
     planet_ebo.buffer_elements_realloc(tri_indices.data(), static_cast<i32>(tri_indices.size()));
-    planet_vao = VertexArrayObject(&planet_prog, {planet_vbo}, {planet_spec}, planet_ebo);
+    planet_vao = VertexArrayObject(planet_prog, {planet_vbo}, {planet_spec}, planet_ebo);
 
     auto outline_ebo = ElementBufferObject(GL_STATIC_DRAW, GL_LINES);
     outline_ebo.buffer_elements_realloc(line_indices.data(), static_cast<i32>(line_indices.size()));
-    outline_vao = VertexArrayObject(&outline_prog, {planet_vbo}, {planet_spec}, outline_ebo);
+    outline_vao = VertexArrayObject(outline_prog, {planet_vbo}, {planet_spec}, outline_ebo);
 
-    for (ShaderProgram* program : {&planet_prog, &outline_prog}) {
-        program->bind_uniform_block(view_projection_ubo);
+    for (u32 id : {planet_prog, outline_prog}) {
+        auto& program = shader_programs.at(id);
+        program.bind_uniform_block(view_projection_ubo);
     }
-
-    shader_users.emplace(planet_vert.id, &planet_prog);
-    shader_users.emplace(planet_frag.id, &planet_prog);
-    shader_users.emplace(planet_vert.id, &outline_prog);
-    shader_users.emplace(outline_frag.id, &outline_prog);
 }
 
 void Renderer::render() {
 
     {
-        std::unordered_set<ShaderProgram*> programs_to_load;
-
-        if (planet_vert.load()) {
-            auto range = shader_users.equal_range(planet_vert.id);
-            for (auto it = range.first; it != range.second; ++it) {
-                programs_to_load.insert(it->second);
-            }
-        }
-        if (planet_frag.load()) {
-            auto range = shader_users.equal_range(planet_frag.id);
-            for (auto it = range.first; it != range.second; ++it) {
-                programs_to_load.insert(it->second);
-            }
-        }
-        if (outline_frag.load()) {
-            auto range = shader_users.equal_range(outline_frag.id);
-            for (auto it = range.first; it != range.second; ++it) {
-                programs_to_load.insert(it->second);
+        std::unordered_set<u32> programs_to_load;
+        for (auto& entry : shaders) {
+            Shader& shader = entry.second;
+            if (shader.load()) {
+                auto range = shader_users.equal_range(shader.id);
+                for (auto it = range.first; it != range.second; ++it) {
+                    programs_to_load.insert(it->second);
+                }
             }
         }
 
-        for (auto program : programs_to_load) {
-            program->load();
+        for (auto id : programs_to_load) {
+            shader_programs.at(id).load();
         }
     }
 
@@ -478,36 +498,18 @@ void Renderer::erase_vbo(const u32 id) {
     vbos.erase(id);
 }
 
-Shader::Shader(const Path& shader_path, const GLenum type) : id(glCreateShader(type)) {
-    auto resource_path = Path("shaders/");
-    resource_path /= shader_path;
-    path = app->get_resource_path(resource_path);
-    load();
+u32 Renderer::add_shader(const Path& shader_path, GLenum type) {
+    auto shader = Shader(shader_path, type);
+    u32 id = shader.id;
+    shaders.emplace(id, shader);
+    return id;
 }
 
-bool Shader::load() {
-    auto new_time = fs::last_write_time(path);
-    if (new_time > last_time) {
-
-        const std::string source = read_file(path);
-        const char* const source_c = source.c_str();
-
-        glShaderSource(id, 1, &source_c, nullptr);
-        glCompileShader(id);
-
-        i32 success;
-        glGetShaderiv(id, GL_COMPILE_STATUS, &success);
-        if (!success) {
-            i32 len;
-            glGetShaderiv(id, GL_INFO_LOG_LENGTH, &len);
-            std::vector<char> log(static_cast<size_t>(len));
-            glGetShaderInfoLog(id, len, NULL, log.data());
-            LOG_F(ERROR, "Shader compilation failed: {}", log.data());
-        }
-
-        last_time = new_time;
-        return true;
-    } else {
-        return false;
-    }
+u32 Renderer::add_shader_program(u32 vertex_shader, u32 fragment_shader) {
+    auto program = ShaderProgram(shaders.at(vertex_shader), shaders.at(fragment_shader));
+    u32 id = program.id;
+    shader_programs.emplace(id, program);
+    shader_users.emplace(vertex_shader, id);
+    shader_users.emplace(fragment_shader, id);
+    return id;
 }
